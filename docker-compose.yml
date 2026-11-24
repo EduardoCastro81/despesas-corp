@@ -1,0 +1,32 @@
+# Servidor próprio (VPS): sistema + Caddy, que gera o certificado HTTPS automaticamente.
+# 1. Aponte o DNS do domínio (ex.: despesas.suaempresa.com.br) para o IP do servidor.
+# 2. Crie o arquivo .env (copie de .env.example) e defina DOMINIO e APP_URL.
+# 3. docker compose up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      TRUST_PROXY: "1"
+    volumes:
+      - dados:/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMINIO: ${DOMINIO:?defina DOMINIO no .env}
+    command: ["caddy", "reverse-proxy", "--from", "${DOMINIO}", "--to", "app:3000"]
+    volumes:
+      - caddy_data:/data
+    depends_on:
+      - app
+
+volumes:
+  dados:
+  caddy_data:

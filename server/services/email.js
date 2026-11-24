@@ -191,6 +191,22 @@ function sendDailyReminders({ force = false } = {}) {
   return n;
 }
 
+// Link de redefinição de senha: enviado mesmo com os avisos desativados (é um pedido do próprio usuário)
+function sendPasswordReset(user, token, minutes) {
+  const platform = ADMIN_ROLES.includes(user.role) ? 'admin' : 'app';
+  const href = `${appUrl()}/${platform}/#/redefinir/${token}`;
+  enqueue({
+    userId: user.id, to: user.email, type: 'redefinir_senha', subject: '[Despesas] Redefinição de senha',
+    html: layout({
+      title: 'Redefinição de senha',
+      intro: `Olá, ${user.name.split(' ')[0]}.\nRecebemos um pedido para criar uma nova senha. O link vale por ${minutes} minutos e só pode ser usado uma vez.`,
+      button: { href, label: 'Criar nova senha' },
+      footer: 'Se você não pediu a redefinição, ignore este e-mail: sua senha atual continua valendo.',
+    }),
+    text: `Redefinição de senha\n\nUse o link abaixo em até ${minutes} minutos:\n${href}\n\nSe você não pediu, ignore este e-mail.`,
+  });
+}
+
 function sendTest(to) {
   if (!isConfigured()) throw new Error('SMTP não configurado no servidor');
   return getTransporter().sendMail({
@@ -210,4 +226,4 @@ function start() {
   scheduleProcess();
 }
 
-module.exports = { isConfigured, isEnabled, queueNotificationEmail, processQueue, sendDailyReminders, sendTest, start, fromAddress, appUrl };
+module.exports = { isConfigured, isEnabled, queueNotificationEmail, sendPasswordReset, processQueue, sendDailyReminders, sendTest, start, fromAddress, appUrl };

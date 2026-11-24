@@ -87,9 +87,13 @@ test('upload sem chave de API retorna aviso de leitura automática', async () =>
   const r = await call('colab', 'PUT', `/api/expenses/${ids.e1}`, { attachment_ids: [ids.att] });
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.body.attachment_count, 1);
-  const f = await fetch(`${base}/api/files/${ids.att}?token=${tokens.sup}`);
+  const f = await fetch(`${base}/api/files/${ids.att}`, { headers: { Authorization: `Bearer ${tokens.sup}` } });
   assert.strictEqual(f.status, 200);
-  assert.strictEqual((await fetch(`${base}/api/files/${ids.att}?token=${tokens.outro}`)).status, 404);
+  assert.strictEqual((await fetch(`${base}/api/files/${ids.att}`, { headers: { Authorization: `Bearer ${tokens.outro}` } })).status, 404);
+  // token na URL não é mais aceito
+  assert.strictEqual((await fetch(`${base}/api/files/${ids.att}?token=${tokens.sup}`)).status, 401);
+  // cookie de sessão é aceito para comprovantes
+  assert.strictEqual((await fetch(`${base}/api/files/${ids.att}`, { headers: { Cookie: `dc_session=${tokens.sup}` } })).status, 200);
 });
 
 test('adiantamento: solicitação, aprovação e pagamento', async () => {
@@ -184,6 +188,18 @@ test('relatórios e exportação', async () => {
   const x = await fetch(`${base}/api/expenses/export?format=xlsx`, { headers: { Authorization: `Bearer ${tokens.gestor}` } });
   assert.strictEqual(x.status, 200);
   assert.ok((await x.arrayBuffer()).byteLength > 1000);
-  const p = await call(null, 'GET', `/api/reports/${ids.rep}/print?token=${tokens.colab}`);
-  assert.match(p.body, /A devolver pelo colaborador/);
+  const p = await fetch(`${base}/api/reports/${ids.rep}/print`, { headers: { Cookie: `dc_session=${tokens.colab}` } });
+  assert.match(await p.text(), /A devolver pelo colaborador/);
+  // o cookie não vale para as demais rotas da API (proteção contra CSRF)
+  assert.strictEqual((await fetch(`${base}/api/expenses`, { headers: { Cookie: `dc_session=${tokens.colab}` } })).status, 401);
+});
+
+test('backup: somente o master, gera cópia do banco e dos comprovantes', async () => {
+  assert.strictEqual((await call('gestor', 'POST', '/api/backup')).status, 403);
+  const r = await call('master', 'POST', '/api/backup');
+  assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+  assert.ok(r.body.result.ok);
+  assert.ok(fs.existsSync(path.join(r.body.result.path, 'despesas.db')));
+  assert.ok(fs.existsSync(path.join(r.body.result.path, 'uploads')));
+  assert.strictEqual(r.body.count, 1);
 });

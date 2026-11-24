@@ -258,7 +258,6 @@ r.get('/reports/:id/print', wrap((req, res) => {
   const atts = all(`SELECT a.id, a.expense_id, a.mime FROM attachments a JOIN expenses e ON e.id = a.expense_id WHERE e.report_id = ? ORDER BY a.expense_id, a.id`, rp.id);
   const s = getSettings();
   const d = (x) => (x ? x.slice(0, 10).split('-').reverse().join('/') + (x.length > 10 ? ' ' + x.slice(11, 16) : '') : '—');
-  const tok = encodeURIComponent(req.query.token || '');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Prestação de contas #${rp.id}</title>
 <style>
@@ -297,7 +296,7 @@ ${hist.map((h) => `<tr><td>${d(h.created_at)}</td><td>${esc(h.user_name)} <span 
 <div class="sig"><div>${esc(rp.user_name)}<br>Colaborador</div><div>Supervisor</div><div>Gestor</div></div>
 ${atts.length ? `<h2 style="break-before:page">Comprovantes</h2><div class="recs">${atts.map((a) => `<figure>${a.mime === 'application/pdf'
     ? `<div>Despesa #${a.expense_id}: comprovante em PDF (anexo #${a.id})</div>`
-    : `<img src="/api/files/${a.id}?token=${tok}" alt="Comprovante da despesa ${a.expense_id}">`}<figcaption class="muted">Despesa #${a.expense_id}</figcaption></figure>`).join('')}</div>` : ''}
+    : `<img src="/api/files/${a.id}" alt="Comprovante da despesa ${a.expense_id}">`}<figcaption class="muted">Despesa #${a.expense_id}</figcaption></figure>`).join('')}</div>` : ''}
 </body></html>`);
 }));
 

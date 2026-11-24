@@ -74,18 +74,46 @@ function loadSecret() {
 }
 const SECRET = loadSecret();
 
+const SESSION_HOURS = 12;
+const COOKIE_NAME = 'dc_session';
+
+// token_version (tv) permite encerrar todas as sessões de um usuário (troca de senha, desativação)
 function signToken(user) {
-  return jwt.sign({ sub: user.id, role: user.role }, SECRET, { expiresIn: '12h' });
+  return jwt.sign({ sub: user.id, role: user.role, tv: user.token_version || 0 }, SECRET, { expiresIn: `${SESSION_HOURS}h` });
 }
+
+// Cookie HttpOnly usado apenas para carregar comprovantes (<img>) e a página de impressão,
+// para que o token de sessão nunca apareça em URLs, históricos ou logs.
+function setSessionCookie(req, res, token) {
+  res.cookie(COOKIE_NAME, token, {
+    httpOnly: true, sameSite: 'strict', secure: req.secure, path: '/api', maxAge: SESSION_HOURS * 3600 * 1000,
+  });
+}
+function clearSessionCookie(req, res) {
+  res.clearCookie(COOKIE_NAME, { httpOnly: true, sameSite: 'strict', secure: req.secure, path: '/api' });
+}
+function readCookie(req, name) {
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return null;
+}
+// Rotas somente-leitura que aceitam o cookie (carregadas pelo navegador sem cabeçalho Authorization)
+const COOKIE_ROUTES = /^\/api\/(files\/\d+|reports\/\d+\/print)(\?|$)/;
 
 function authenticate(req, res, next) {
   const h = req.headers.authorization || '';
-  const token = h.startsWith('Bearer ') ? h.slice(7) : req.query.token;
+  let token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (!token && req.method === 'GET' && COOKIE_ROUTES.test(req.originalUrl)) token = readCookie(req, COOKIE_NAME);
   if (!token) return next(new HttpError(401, 'Não autenticado'));
   try {
     const payload = jwt.verify(token, SECRET);
-    const u = one('SELECT id, name, email, role, supervisor_id, cost_center, department, active, email_notifications FROM users WHERE id = ?', payload.sub);
+    const u = one('SELECT id, name, email, role, supervisor_id, cost_center, department, active, email_notifications, token_version FROM users WHERE id = ?', payload.sub);
     if (!u || !u.active) return next(new HttpError(401, 'Usuário inativo'));
+    if ((payload.tv || 0) !== (u.token_version || 0)) return next(new HttpError(401, 'Sessão encerrada. Entre novamente.'));
+    delete u.token_version;
     req.user = u;
     next();
   } catch {
@@ -128,6 +156,15 @@ const brl = (c) => (c / 100).toLocaleString('pt-BR', { style: 'currency', curren
 const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// Política de senha: mínimo 8 caracteres, com letras e números
+function checkPassword(pw) {
+  const p = String(pw || '');
+  if (p.length < 8 || !/[A-Za-z]/.test(p) || !/\d/.test(p)) {
+    throw bad('A senha deve ter ao menos 8 caracteres, com letras e números');
+  }
+  return p;
+}
+
 const wrap = (fn) => (req, res, next) => {
   try {
     const r = fn(req, res, next);
@@ -138,6 +175,6 @@ const wrap = (fn) => (req, res, next) => {
 module.exports = {
   ROLES, PAYMENT_METHODS, DOC_TYPES, EXPENSE_STATUS, REPORT_STATUS, ADVANCE_STATUS, EXPENSE_FIELDS,
   HttpError, bad, forbidden, notFound,
-  signToken, authenticate, requireRole, isAdmin, teamIds, scopeSql, canSeeUser,
-  toCents, fromCents, brl, isDate, esc, wrap,
+  signToken, setSessionCookie, clearSessionCookie, authenticate, requireRole, isAdmin, teamIds, scopeSql, canSeeUser,
+  toCents, fromCents, brl, isDate, esc, wrap, checkPassword,
 };

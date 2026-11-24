@@ -1,12 +1,15 @@
 import {
   $, $$, esc, brl, dt, dtt, today, monthStart, fmtDoc, api, qs, session, toast, fail, modal, prompt, confirmBox,
   reportBadge, expBadge, advBadge, expFlags, receiptViewer, editsHtml, expenseForm, openExpenseEdit, bootstrap, loginScreen, fileUrl,
+  logoutSession, changePasswordApi, resetPasswordToken, resetScreen, PASSWORD_HINT,
 } from '/shared/core.js';
 
 const root = $('#root');
 let unread = 0;
 
 async function start() {
+  const rt = resetPasswordToken();
+  if (rt) return resetScreen(root, rt, () => { session.clear(); start(); });
   if (!session.token) return loginScreen(root, { title: 'Lançamento de despesas', subtitle: 'Registre despesas e envie sua prestação de contas', onLogin: () => start() });
   try { await bootstrap(); } catch { session.clear(); return start(); }
   root.innerHTML = `<div class="app"><div class="topbar"><div class="brand"><span class="logo">R$</span><span id="ttl">Despesas</span></div>
@@ -220,7 +223,7 @@ P.prestacao = async (page, id) => {
   bindItems(lst);
   const reload = () => P.prestacao(page, id);
   $$('[data-rm]', lst).forEach((b) => (b.onclick = async (ev) => { ev.stopPropagation(); await api(`/reports/${r.id}/expenses/${b.dataset.rm}`, { method: 'DELETE' }).then(reload, fail); }));
-  $('#pr').onclick = () => window.open(`/api/reports/${r.id}/print?token=${encodeURIComponent(session.token)}`, '_blank');
+  $('#pr').onclick = () => window.open(`/api/reports/${r.id}/print`, '_blank');
   const dl = $('#dl'); if (dl) dl.onclick = async () => { if (await confirmBox('Excluir rascunho', 'As despesas voltarão para a lista de não prestadas.', 'Excluir', 'danger solid')) api(`/reports/${r.id}`, { method: 'DELETE' }).then(() => (location.hash = '#/prestacoes'), fail); };
   const inc = $('#inc'); if (inc) inc.onclick = async () => {
     const loose = (await api(`/expenses${qs({ user_id: session.me.id, no_report: 1 })}`)).items;
@@ -275,11 +278,14 @@ P.perfil = async (page) => {
     <dt>Supervisor</dt><dd>${esc(me.supervisor?.name || '—')}</dd><dt>Centro de custo</dt><dd>${esc(me.cost_center || '—')}</dd></dl></div>
     <div class="card"><h2>Avisos</h2><label class="row" style="gap:.5rem;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="en" ${me.email_notifications ? 'checked' : ''}> <span>Receber avisos por e-mail${session.meta.email_configured ? '' : ' <span class="muted small">(envio de e-mails ainda não configurado pela empresa)</span>'}</span></label>
       <p class="muted small">Você é avisado quando uma prestação é aprovada, devolvida ou rejeitada, quando uma despesa sua é editada ou glosada e sobre seus adiantamentos.</p></div>
-    <div class="card"><h2>Alterar senha</h2><div class="stack"><label class="f">Senha atual<input type="password" id="pc"></label><label class="f">Nova senha<input type="password" id="pn"></label><button class="btn" id="sp">Salvar senha</button></div></div>
+    <div class="card"><h2>Alterar senha</h2><div class="stack"><label class="f">Senha atual<input type="password" id="pc"></label><label class="f">Nova senha<input type="password" id="pn" autocomplete="new-password"><span class="muted small">${PASSWORD_HINT}</span></label><button class="btn" id="sp">Salvar senha</button></div></div>
     <div class="row"><a class="btn" href="#/adiantamentos">Adiantamentos</a><a class="btn" href="#/notificacoes">Notificações</a>${me.role !== 'colaborador' ? '<a class="btn" href="/admin/">Plataforma de administração</a>' : ''}<button class="btn danger" id="lo">Sair</button></div></div>`;
   $('#en').onchange = (ev) => api('/me/preferences', { method: 'PUT', body: { email_notifications: ev.target.checked } }).then(() => { me.email_notifications = ev.target.checked ? 1 : 0; toast(ev.target.checked ? 'Você receberá avisos por e-mail' : 'Avisos por e-mail desativados', 'good'); }, fail);
-  $('#sp').onclick = () => api('/me/password', { method: 'POST', body: { current: $('#pc').value, password: $('#pn').value } }).then(() => toast('Senha alterada', 'good'), fail);
-  $('#lo').onclick = () => { session.clear(); location.hash = ''; location.reload(); };
+  $('#sp').onclick = () => changePasswordApi($('#pc').value, $('#pn').value).then(() => toast('Senha alterada', 'good'), fail);
+  $('#lo').onclick = logoutSession;
 };
+
+// Link de redefinição de senha aberto com o sistema já carregado
+window.addEventListener('hashchange', () => { if (resetPasswordToken()) start(); });
 
 start();

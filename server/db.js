@@ -179,6 +179,15 @@ function addColumn(table, column, ddl) {
   if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
 }
 addColumn('users', 'email_notifications', 'INTEGER NOT NULL DEFAULT 1');
+addColumn('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');
+db.exec(`CREATE TABLE IF NOT EXISTS password_resets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+)`);
 
 function tx(fn) {
   db.exec('BEGIN');
@@ -234,7 +243,9 @@ function seedBase() {
   const c = one('SELECT COUNT(*) n FROM users').n;
   if (c === 0) {
     const email = process.env.MASTER_EMAIL || 'admin@empresa.com';
-    const pass = process.env.MASTER_PASSWORD || 'admin123';
+    // Em produção nunca usa a senha padrão: sem MASTER_PASSWORD, gera uma aleatória e mostra só no log
+    const pass = process.env.MASTER_PASSWORD
+      || (process.env.NODE_ENV === 'production' ? require('crypto').randomBytes(9).toString('base64url') + '7a' : 'admin123');
     run(`INSERT INTO users(name,email,password_hash,role) VALUES(?,?,?, 'master')`,
       'Administrador Master', email, bcrypt.hashSync(pass, 10));
     console.log(`[seed] Usuário master criado: ${email} / ${pass} (altere a senha após o primeiro acesso)`);

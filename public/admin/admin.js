@@ -1,7 +1,7 @@
 import {
   $, $$, esc, brl, dt, dtt, today, monthStart, fmtDoc, api, qs, session, toast, fail, modal, prompt, confirmBox, download,
   reportBadge, expBadge, advBadge, expFlags, optionList, catOptions, receiptViewer, editsHtml, expenseForm, openExpenseEdit,
-  bootstrap, loginScreen,
+  bootstrap, loginScreen, logoutSession, changePasswordApi, resetPasswordToken, resetScreen, PASSWORD_HINT,
 } from '/shared/core.js';
 
 const root = $('#root');
@@ -12,6 +12,8 @@ let pendingApprovals = 0;
 
 // ---------- Inicialização ----------
 async function start() {
+  const rt = resetPasswordToken();
+  if (rt) return resetScreen(root, rt, () => { session.clear(); showLogin(); });
   if (!session.token) return showLogin();
   try { await bootstrap(); } catch { return showLogin(); }
   if (session.me.role === 'colaborador') {
@@ -30,7 +32,7 @@ async function start() {
 function showLogin() {
   loginScreen(root, { title: 'Plataforma de administração', subtitle: 'Conferência, aprovação e análise de despesas', onLogin: () => start() });
 }
-function logout() { session.clear(); location.hash = ''; location.reload(); }
+const logout = logoutSession;
 
 const NAV = [
   { sec: 'Operação' },
@@ -79,11 +81,11 @@ function changePassword() {
   modal({
     title: 'Meu perfil', body: `<div class="stack">
       <label class="row" style="gap:.4rem"><input type="checkbox" id="pe" ${session.me.email_notifications ? 'checked' : ''}> Receber avisos por e-mail em ${esc(session.me.email)}</label>
-      <h3 style="margin-top:1rem">Alterar senha</h3><label class="f">Senha atual<input type="password" id="pc"></label><label class="f">Nova senha<input type="password" id="pn"></label></div>`,
+      <h3 style="margin-top:1rem">Alterar senha</h3><label class="f">Senha atual<input type="password" id="pc"></label><label class="f">Nova senha<input type="password" id="pn" autocomplete="new-password"><span class="muted small">${PASSWORD_HINT}</span></label></div>`,
     actions: [{ label: 'Cancelar' }, { label: 'Salvar', kind: 'primary', onClick: async ({ el }) => {
       const pref = $('#pe', el).checked;
       if (pref !== Boolean(session.me.email_notifications)) { await api('/me/preferences', { method: 'PUT', body: { email_notifications: pref } }); session.me.email_notifications = pref ? 1 : 0; }
-      if ($('#pn', el).value) await api('/me/password', { method: 'POST', body: { current: $('#pc', el).value, password: $('#pn', el).value } });
+      if ($('#pn', el).value) await changePasswordApi($('#pc', el).value, $('#pn', el).value);
       toast('Perfil atualizado', 'good');
     } }],
   });
@@ -358,7 +360,7 @@ PAGES.prestacao = async (page, id) => {
     const gl = $('[data-glosa]', preview); if (gl) gl.onclick = async () => { const reason = await prompt({ title: 'Glosar despesa', label: 'Motivo da glosa' }); if (!reason) return; await api(`/expenses/${e.id}/review`, { method: 'POST', body: { action: 'glosar', reason } }).then(reload, fail); };
     const ug = $('[data-unglosa]', preview); if (ug) ug.onclick = () => api(`/expenses/${e.id}/review`, { method: 'POST', body: { action: 'restaurar' } }).then(reload, fail);
   }));
-  $('#pr').onclick = () => window.open(`/api/reports/${r.id}/print?token=${encodeURIComponent(session.token)}`, '_blank');
+  $('#pr').onclick = () => window.open(`/api/reports/${r.id}/print`, '_blank');
   const act = async (path, body, msg) => { await api(`/reports/${r.id}/${path}`, { method: 'POST', body }); toast(msg, 'good'); refreshCounters(); reload(); };
   if (r.can_act) {
     $('#ap').onclick = async () => {
@@ -537,7 +539,7 @@ function userForm(u, done) {
       <label class="f">Supervisor / aprovador<select id="s"><option value="">Nenhum (vai direto ao gestor)</option>${sups.map((x) => `<option value="${x.id}" ${u?.supervisor_id === x.id ? 'selected' : ''}>${esc(x.name)} (${esc(session.meta.roles[x.role])})</option>`).join('')}</select></label>
       <label class="f">Centro de custo<input id="cc" value="${esc(u?.cost_center || '')}"></label><label class="f">Departamento<input id="dp" value="${esc(u?.department || '')}"></label>
       <label class="f">CPF<input id="cpf" value="${esc(u?.cpf || '')}"></label>
-      <label class="f">${u ? 'Nova senha (opcional)' : 'Senha inicial'}<input id="p" type="password" autocomplete="new-password"></label>
+      <label class="f">${u ? 'Nova senha (opcional)' : 'Senha inicial'}<input id="p" type="password" autocomplete="new-password"><span class="muted small">${PASSWORD_HINT}</span></label>
       <label class="f">Avisos por e-mail<select id="en"><option value="1">Receber</option><option value="0" ${u && !u.email_notifications ? 'selected' : ''}>Não receber</option></select></label>
       ${u ? `<label class="f"><span>Situação</span><select id="a"><option value="1" ${u.active ? 'selected' : ''}>Ativo</option><option value="0" ${u.active ? '' : 'selected'}>Inativo</option></select></label>` : ''}
     </div>`,
@@ -625,7 +627,31 @@ PAGES.config = async (page) => {
   };
   $('#rem').onclick = () => api('/email/reminders', { method: 'POST' }).then((r) => toast(`Lembrete enviado para ${r.recipients} aprovador(es)`, 'good'), fail);
   $('#elog').onclick = emailLog;
+  if (session.me.role === 'master') renderBackupCard(box);
 };
+
+async function renderBackupCard(box) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  box.insertBefore(card, box.lastElementChild);
+  const draw = (b) => {
+    const last = b.last;
+    const size = (n) => `${(n / 1048576).toFixed(1)} MB`;
+    card.innerHTML = `<h2>Backup</h2>
+      ${!last ? '<div class="alert warn">Nenhum backup feito ainda.</div>'
+        : last.ok ? `<div class="alert good">Último backup: ${esc(new Date(last.at).toLocaleString('pt-BR'))} · ${size(last.size)}</div>`
+          : `<div class="alert bad">Último backup falhou em ${esc(new Date(last.at).toLocaleString('pt-BR'))}: ${esc(last.error)}</div>`}
+      <p class="muted small" style="margin-top:.6rem">${b.enabled ? `Backup automático diário a partir das ${String(b.hour).padStart(2, '0')}:00` : 'Backup automático desativado (BACKUP_ENABLED=0)'} ·
+        guarda os ${b.keep} mais recentes (${b.count} guardados agora) em <code>${esc(b.dir)}</code>.
+        Copie essa pasta periodicamente para outro local (nuvem ou outro disco).</p>
+      <button class="btn" id="bk">Fazer backup agora</button>`;
+    $('#bk', card).onclick = async () => {
+      $('#bk', card).disabled = true;
+      try { const r = await api('/backup', { method: 'POST' }); toast('Backup concluído', 'good'); draw(r); } catch (e) { fail(e); $('#bk', card).disabled = false; }
+    };
+  };
+  draw(await api('/backup'));
+}
 
 async function emailLog() {
   const { counts, items } = await api('/email/log');
@@ -649,5 +675,8 @@ async function emailLog() {
 
 // Atalho: links de notificação "#/despesa/:id" abrem o detalhe sobre a conferência
 PAGES.despesa = async (page, id) => { await PAGES.conferencia(page); expenseDetail(Number(id)); };
+
+// Link de redefinição de senha aberto com o sistema já carregado
+window.addEventListener('hashchange', () => { if (resetPasswordToken()) start(); });
 
 start();

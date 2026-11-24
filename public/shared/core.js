@@ -59,7 +59,8 @@ export const qs = (obj) => {
   return s ? `?${s}` : '';
 };
 
-export const fileUrl = (id, download = false) => `/api/files/${id}?token=${encodeURIComponent(session.token)}${download ? '&download=1' : ''}`;
+// Os comprovantes são autorizados por um cookie HttpOnly (o token de sessão não vai na URL)
+export const fileUrl = (id, download = false) => `/api/files/${id}${download ? '?download=1' : ''}`;
 
 export async function download(path, filename) {
   const res = await api(path, { raw: true });
@@ -381,6 +382,59 @@ export async function openExpenseEdit(id, { onSaved, advances } = {}) {
   });
 }
 
+export async function logoutSession() {
+  try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignora */ }
+  session.clear();
+  location.hash = '';
+  location.reload();
+}
+
+export async function changePasswordApi(current, password) {
+  const r = await api('/me/password', { method: 'POST', body: { current, password } });
+  if (r.token) session.set(r.token);
+  return r;
+}
+
+export const PASSWORD_HINT = 'Mínimo de 8 caracteres, com letras e números.';
+
+// Tela "criar nova senha" aberta pelo link enviado por e-mail (#/redefinir/<token>)
+export function resetPasswordToken() {
+  const m = location.hash.match(/^#\/redefinir\/([A-Za-z0-9_-]+)/);
+  return m ? m[1] : null;
+}
+export function resetScreen(root, token, onDone) {
+  root.innerHTML = `<div class="login-wrap"><div class="card login-card stack">
+    <div class="brand"><span class="logo">R$</span>Despesas Corp</div>
+    <div><h1>Criar nova senha</h1><div class="muted">${esc(PASSWORD_HINT)}</div></div>
+    <form class="stack" id="rf">
+      <label class="f">Nova senha<input type="password" name="p1" autocomplete="new-password" required></label>
+      <label class="f">Repita a nova senha<input type="password" name="p2" autocomplete="new-password" required></label>
+      <button class="btn primary" style="width:100%">Salvar nova senha</button>
+    </form></div></div>`;
+  $('#rf', root).onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = ev.target.elements;
+    if (f.p1.value !== f.p2.value) return toast('As senhas não conferem', 'bad');
+    try {
+      await api('/auth/reset', { method: 'POST', body: { token, password: f.p1.value } });
+      toast('Senha alterada. Entre com a nova senha.', 'good');
+      history.replaceState(null, '', location.pathname);
+      onDone();
+    } catch (e) { fail(e); }
+  };
+}
+
+function forgotPassword() {
+  modal({
+    title: 'Esqueci minha senha',
+    body: '<p>Informe seu e-mail. Enviaremos um link para você criar uma nova senha.</p><label class="f">E-mail<input type="email" id="fe" autocomplete="username"></label>',
+    actions: [{ label: 'Cancelar' }, { label: 'Enviar link', kind: 'primary', onClick: async ({ el }) => {
+      const r = await api('/auth/forgot', { method: 'POST', body: { email: $('#fe', el).value } });
+      toast(r.message, 'good');
+    } }],
+  });
+}
+
 export async function bootstrap() {
   session.meta = await api('/meta');
   session.me = await api('/me');
@@ -394,7 +448,9 @@ export function loginScreen(root, { title, subtitle, onLogin }) {
       <label class="f">E-mail<input type="email" name="email" autocomplete="username" required></label>
       <label class="f">Senha<input type="password" name="password" autocomplete="current-password" required></label>
       <button class="btn primary" style="width:100%">Entrar</button>
-    </form></div></div>`;
+    </form>
+    <button class="btn ghost sm" id="fg" type="button" style="align-self:center">Esqueci minha senha</button></div></div>`;
+  $('#fg', root).onclick = forgotPassword;
   $('#lf', root).onsubmit = async (ev) => {
     ev.preventDefault();
     const f = ev.target.elements;

@@ -10,14 +10,66 @@ const { authenticate, requireRole, wrap, bad, forbidden, notFound, signToken } =
 const r = express.Router();
 
 // ---------- Autenticação ----------
+const crypto = require('crypto');
+const limits = require('../services/ratelimit');
+
 r.post('/auth/login', wrap((req, res) => {
-  const { email, password } = req.body || {};
-  const u = one('SELECT * FROM users WHERE email = ?', String(email || '').trim());
+  const { email: mail, password } = req.body || {};
+  const key = String(mail || '').trim().toLowerCase();
+  const wait = Math.max(limits.loginByEmail.blockedFor(key), limits.loginByIp.blockedFor(req.ip));
+  if (wait) {
+    res.setHeader('Retry-After', String(wait));
+    throw new C.HttpError(429, `Muitas tentativas. Tente novamente em ${Math.ceil(wait / 60)} minuto(s) ou use "Esqueci minha senha".`);
+  }
+  const u = one('SELECT * FROM users WHERE email = ?', key);
   if (!u || !u.active || !bcrypt.compareSync(String(password || ''), u.password_hash)) {
+    limits.loginByEmail.fail(key);
+    limits.loginByIp.fail(req.ip);
     throw new C.HttpError(401, 'E-mail ou senha inválidos');
   }
+  limits.loginByEmail.reset(key);
+  const token = signToken(u);
   delete u.password_hash;
-  res.json({ token: signToken(u), user: u });
+  delete u.token_version;
+  C.setSessionCookie(req, res, token);
+  res.json({ token, user: u });
+}));
+
+r.post('/auth/logout', (req, res) => {
+  C.clearSessionCookie(req, res);
+  res.json({ ok: true });
+});
+
+const sha256 = (t) => crypto.createHash('sha256').update(t).digest('hex');
+const RESET_MINUTES = 60;
+
+r.post('/auth/forgot', wrap((req, res) => {
+  const wait = limits.forgotByIp.blockedFor(req.ip);
+  if (wait) throw new C.HttpError(429, 'Muitos pedidos de redefinição. Tente novamente mais tarde.');
+  limits.forgotByIp.fail(req.ip);
+  if (!email.isConfigured()) throw bad('O envio de e-mails não está configurado. Procure o gestor para redefinir sua senha.');
+  const mail = String(req.body?.email || '').trim().toLowerCase();
+  const u = mail && one('SELECT id, name, email, role, active FROM users WHERE email = ?', mail);
+  if (u && u.active) {
+    const token = crypto.randomBytes(32).toString('base64url');
+    run(`UPDATE password_resets SET used_at = datetime('now','localtime') WHERE user_id = ? AND used_at IS NULL`, u.id);
+    run(`INSERT INTO password_resets(user_id, token_hash, expires_at) VALUES(?, ?, datetime('now','localtime', ?))`, u.id, sha256(token), `+${RESET_MINUTES} minutes`);
+    email.sendPasswordReset(u, token, RESET_MINUTES);
+  }
+  // Mesma resposta exista ou não o e-mail (não revela quem é usuário)
+  res.json({ ok: true, message: 'Se o e-mail estiver cadastrado, você receberá um link para criar uma nova senha.' });
+}));
+
+r.post('/auth/reset', wrap((req, res) => {
+  const { token, password } = req.body || {};
+  const row = token && one(`SELECT * FROM password_resets WHERE token_hash = ? AND used_at IS NULL AND expires_at > datetime('now','localtime')`, sha256(String(token)));
+  if (!row) throw bad('Link inválido ou expirado. Peça uma nova redefinição de senha.');
+  const pw = C.checkPassword(password);
+  run(`UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?`, bcrypt.hashSync(pw, 10), row.user_id);
+  run(`UPDATE password_resets SET used_at = datetime('now','localtime') WHERE user_id = ? AND used_at IS NULL`, row.user_id);
+  const u = one('SELECT email FROM users WHERE id = ?', row.user_id);
+  limits.loginByEmail.reset(u.email.toLowerCase());
+  res.json({ ok: true });
 }));
 
 r.use(authenticate);
@@ -26,6 +78,9 @@ r.get('/me', wrap((req, res) => {
   const team = req.user.role === 'supervisor'
     ? all('SELECT id, name FROM users WHERE supervisor_id = ? AND active = 1 ORDER BY name', req.user.id) : [];
   const sup = req.user.supervisor_id ? one('SELECT id, name FROM users WHERE id = ?', req.user.supervisor_id) : null;
+  // Renova o cookie usado pelos comprovantes (útil para sessões abertas antes do login)
+  const h = req.headers.authorization || '';
+  if (h.startsWith('Bearer ')) C.setSessionCookie(req, res, h.slice(7));
   res.json({ ...req.user, team, supervisor: sup });
 }));
 
@@ -33,9 +88,12 @@ r.post('/me/password', wrap((req, res) => {
   const { current, password } = req.body || {};
   const u = one('SELECT password_hash FROM users WHERE id = ?', req.user.id);
   if (!bcrypt.compareSync(String(current || ''), u.password_hash)) throw bad('Senha atual incorreta');
-  if (!password || String(password).length < 6) throw bad('A nova senha deve ter ao menos 6 caracteres');
-  run('UPDATE users SET password_hash = ? WHERE id = ?', bcrypt.hashSync(String(password), 10), req.user.id);
-  res.json({ ok: true });
+  const pw = C.checkPassword(password);
+  // Encerra as outras sessões e devolve um novo token para esta
+  run('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?', bcrypt.hashSync(pw, 10), req.user.id);
+  const token = signToken(one('SELECT id, role, token_version FROM users WHERE id = ?', req.user.id));
+  C.setSessionCookie(req, res, token);
+  res.json({ ok: true, token });
 }));
 
 r.put('/me/preferences', wrap((req, res) => {
@@ -91,7 +149,7 @@ function validateUserPayload(actor, body, existing) {
 r.post('/users', requireRole('master', 'gestor'), wrap((req, res) => {
   const b = req.body || {};
   if (!b.name || !b.email) throw bad('Nome e e-mail são obrigatórios');
-  if (!b.password || String(b.password).length < 6) throw bad('Senha inicial deve ter ao menos 6 caracteres');
+  C.checkPassword(b.password);
   validateUserPayload(req.user, b, null);
   if (one('SELECT id FROM users WHERE email = ?', b.email)) throw bad('E-mail já cadastrado');
   const info = run(`INSERT INTO users(name,email,password_hash,role,supervisor_id,cost_center,department,cpf) VALUES(?,?,?,?,?,?,?,?)`,
@@ -114,9 +172,10 @@ r.put('/users/:id', requireRole('master', 'gestor'), wrap((req, res) => {
     b.active === undefined ? u.active : (b.active ? 1 : 0), u.id);
   if (b.email_notifications !== undefined) run('UPDATE users SET email_notifications = ? WHERE id = ?', b.email_notifications ? 1 : 0, u.id);
   if (b.password) {
-    if (String(b.password).length < 6) throw bad('Senha deve ter ao menos 6 caracteres');
-    run('UPDATE users SET password_hash = ? WHERE id = ?', bcrypt.hashSync(String(b.password), 10), u.id);
+    run('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?', bcrypt.hashSync(C.checkPassword(b.password), 10), u.id);
   }
+  // Desativar ou mudar o perfil encerra as sessões abertas do usuário
+  if ((b.active === false && u.active) || (b.role && b.role !== u.role)) run('UPDATE users SET token_version = token_version + 1 WHERE id = ?', u.id);
   res.json({ ok: true });
 }));
 
@@ -212,6 +271,15 @@ r.post('/email/reminders', requireRole('master', 'gestor'), wrap(async (req, res
   const n = email.sendDailyReminders({ force: true });
   await email.processQueue();
   res.json({ ok: true, recipients: n });
+}));
+
+// ---------- Backup ----------
+const backup = require('../services/backup');
+r.get('/backup', requireRole('master'), (req, res) => res.json(backup.status()));
+r.post('/backup', requireRole('master'), wrap((req, res) => {
+  const result = backup.runBackup();
+  if (!result.ok) throw new C.HttpError(500, `Falha no backup: ${result.error}`);
+  res.json({ ...backup.status(), result });
 }));
 
 // ---------- Notificações ----------

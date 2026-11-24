@@ -7,11 +7,16 @@ const { HttpError } = require('./common');
 
 const app = express();
 app.disable('x-powered-by');
+// Atrás de um proxy HTTPS (Render, Railway, Nginx, Caddy): TRUST_PROXY=1 para req.ip e cookies "secure" corretos
+if (process.env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY);
 app.use(express.json({ limit: '2mb' }));
 
 app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=()');
+  if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
   next();
 });
 
@@ -42,6 +47,7 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 const PORT = Number(process.env.PORT || 3000);
 if (require.main === module) {
   require('./services/email').start();
+  require('./services/backup').start();
   app.listen(PORT, () => {
     console.log(`Despesas Corp rodando em http://localhost:${PORT}`);
     console.log(`  Plataforma de administração: http://localhost:${PORT}/admin/`);

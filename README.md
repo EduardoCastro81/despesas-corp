@@ -21,7 +21,10 @@ ANTHROPIC_API_KEY=sk-ant-... npm start
 
 Abra `http://localhost:3000`. No primeiro acesso o sistema cria o **administrador master**:
 `admin@empresa.com` / `admin123`. Troque essa senha no primeiro login. Também dá para definir o acesso inicial com
-`MASTER_EMAIL` e `MASTER_PASSWORD`.
+`MASTER_EMAIL` e `MASTER_PASSWORD`. Em produção (`NODE_ENV=production`) a senha padrão nunca é usada: sem
+`MASTER_PASSWORD`, o sistema gera uma senha aleatória e a mostra no log da primeira execução.
+
+**Para publicar online com HTTPS (Render ou servidor próprio), veja o [DEPLOY.md](DEPLOY.md).**
 
 Para carregar dados de demonstração (equipe, despesas com comprovantes e prestações em várias etapas):
 
@@ -32,7 +35,7 @@ npm run seed:demo
 Os usuários de demonstração usam a senha `demo123`: `gestor@demo.com`, `supervisor@demo.com`, `supervisora@demo.com`,
 `carlos@demo.com`, `ana@demo.com`, `bruno@demo.com` e `diana@demo.com`.
 
-Testes automatizados (cobrem perfis, fluxo de aprovação, edição com notificação, adiantamentos, relatórios e avisos por e-mail):
+Testes automatizados (cobrem perfis, fluxo de aprovação, edição com notificação, adiantamentos, relatórios, avisos por e-mail, segurança e backup):
 
 ```bash
 npm test
@@ -55,9 +58,10 @@ As variáveis podem ser definidas no ambiente do servidor ou num arquivo `.env` 
 | `DATA_DIR` | Pasta do banco e dos comprovantes (padrão `./data`). **Inclua essa pasta no backup** |
 | `JWT_SECRET` | Chave das sessões. Se não for definida, é gerada e guardada em `DATA_DIR` |
 | `MASTER_EMAIL` / `MASTER_PASSWORD` | Acesso do master criado na primeira execução |
+| `TRUST_PROXY` | `1` quando o sistema roda atrás de um proxy HTTPS (Render, Caddy, Nginx) |
+| `BACKUP_HOUR`, `BACKUP_KEEP`, `BACKUP_DIR` | Backup diário: horário (padrão 2), quantos manter (padrão 14) e pasta (padrão `DATA_DIR/backups`). `BACKUP_ENABLED=0` desliga |
 
-Em produção, coloque o sistema atrás de HTTPS (Nginx, Caddy ou o balanceador da nuvem). A câmera do celular só funciona
-em páginas HTTPS.
+Em produção, coloque o sistema atrás de HTTPS (veja o [DEPLOY.md](DEPLOY.md)).
 
 ## Perfis e permissões
 
@@ -94,6 +98,14 @@ traz a tabela de **antes → depois** e a justificativa.
 
 Exemplos de SMTP: Google Workspace/Gmail usa `smtp.gmail.com`, porta 587, com uma "senha de app". Microsoft 365 usa
 `smtp.office365.com`, porta 587.
+
+### Acesso e senhas
+
+- **Esqueci minha senha:** na tela de login, o usuário recebe por e-mail um link válido por 1 hora para criar uma nova
+  senha. Isso exige o SMTP configurado; sem ele, o gestor redefine a senha no cadastro do usuário.
+- **Senhas:** mínimo de 8 caracteres, com letras e números.
+- **Login:** bloqueado por 15 minutos após 5 tentativas erradas.
+- **Sessões:** trocar a senha, desativar um usuário ou mudar o perfil dele encerra as sessões abertas.
 
 ## Rotina de aprovação da prestação de contas
 
@@ -150,7 +162,10 @@ server/
   routes/analytics.js relatórios gerenciais
   services/ocr.js     leitura automática de comprovantes (Claude)
   services/notify.js  notificações e cálculo do antes/depois
-  services/email.js   avisos por e-mail: fila, envio SMTP, novas tentativas, lembrete diário
+  services/email.js   avisos por e-mail: fila, envio SMTP, novas tentativas, lembrete diário, redefinição de senha
+  services/ratelimit.js  bloqueio de tentativas de login e de redefinição de senha
+  services/backup.js  backup diário do banco e dos comprovantes, com retenção
+  backup-cli.js       npm run backup
   seed-demo.js        dados de demonstração
 public/
   app/                plataforma de lançamento (mobile)
@@ -158,4 +173,6 @@ public/
   shared/             estilos e componentes comuns
 test/api.test.js      testes do fluxo completo
 test/email.test.js    testes dos avisos por e-mail (com servidor SMTP de teste)
+test/security.test.js testes de senha, bloqueio de login, sessões e redefinição de senha
+Dockerfile, docker-compose.yml, render.yaml   publicação (ver DEPLOY.md)
 ```
