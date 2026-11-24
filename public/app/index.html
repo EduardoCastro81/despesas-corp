@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f5fbf">
+  <link rel="manifest" href="manifest.webmanifest">
+  <title>Despesas Corp — Lançamento</title>
+  <link rel="stylesheet" href="/shared/styles.css">
+  <style>
+    .app { max-width: 760px; margin: 0 auto; padding: 0 16px calc(84px + env(safe-area-inset-bottom)); }
+    .topbar { position: sticky; top: 0; z-index: 20; background: var(--bg); display: flex; align-items: center; justify-content: space-between; padding: .8rem 0; gap: .5rem; }
+    .bottom { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: var(--surface); border-top: 1px solid var(--border); display: grid; grid-template-columns: repeat(5, 1fr); padding-bottom: env(safe-area-inset-bottom); }
+    .bottom a { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: .5rem 0 .55rem; font-size: 11px; color: var(--text-2); position: relative; }
+    .bottom a .ic { font-size: 19px; line-height: 1; }
+    .bottom a.on { color: var(--primary); }
+    .bottom a.fab .ic { background: var(--primary); color: var(--primary-ink); width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; margin-top: -20px; box-shadow: var(--shadow); font-size: 24px; }
+    .bottom a:hover { text-decoration: none; }
+    .dot { position: absolute; top: 4px; left: calc(50% + 6px); background: var(--bad); color: #fff; border-radius: 999px; font-size: 10px; padding: 0 5px; font-weight: 700; }
+    .item { display: flex; gap: .75rem; align-items: center; padding: .75rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
+    .item + .item { margin-top: .5rem; }
+    .item .thumb { width: 46px; height: 46px; border-radius: 8px; background: var(--surface-2); flex: none; overflow: hidden; display: grid; place-items: center; color: var(--muted); font-size: 11px; }
+    .item .thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .item .main { flex: 1; min-width: 0; }
+    .item .main .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item .amt { font-weight: 650; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+    .big-cta { display: flex; align-items: center; justify-content: flex-start; gap: .8rem; width: 100%; padding: 1rem; font-size: 1rem; border-radius: 12px; white-space: normal; }
+    .big-cta:hover { text-decoration: none; }
+    .sticky-actions { position: sticky; bottom: calc(70px + env(safe-area-inset-bottom)); background: var(--bg); padding: .6rem 0; display: flex; gap: .5rem; z-index: 10; }
+    .sticky-actions .btn { flex: 1; min-height: 44px; }
+    .seg { display: flex; gap: .3rem; overflow-x: auto; padding-bottom: .2rem; }
+    .seg button { border: 1px solid var(--border); background: var(--surface); color: var(--text-2); border-radius: 999px; padding: .35rem .8rem; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+    .seg button.on { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
+    .kv { display: grid; grid-template-columns: 130px 1fr; gap: .35rem .75rem; font-size: 13px; }
+    .kv dt { color: var(--muted); } .kv dd { margin: 0; word-break: break-word; }
+    .timeline li { font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
