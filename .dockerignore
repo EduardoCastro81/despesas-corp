@@ -5,3 +5,4 @@ data
 docs
 test
 *.log
+docker-entrypoint.sh.bak
