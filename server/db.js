@@ -150,11 +150,35 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read_at);
 
+CREATE TABLE IF NOT EXISTS email_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id),
+  to_email TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  html TEXT NOT NULL,
+  text TEXT NOT NULL,
+  type TEXT,
+  status TEXT NOT NULL DEFAULT 'pendente' CHECK (status IN ('pendente','enviado','erro')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  next_attempt_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  sent_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_status ON email_outbox(status, next_attempt_at);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
 );
 `);
+
+// Migrações de colunas adicionadas após a primeira versão
+function addColumn(table, column, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+}
+addColumn('users', 'email_notifications', 'INTEGER NOT NULL DEFAULT 1');
 
 function tx(fn) {
   db.exec('BEGIN');
@@ -183,6 +207,13 @@ const DEFAULT_SETTINGS = {
   notify_owner_draft_edits: '1',
   // Dias máximos entre a data da despesa e o lançamento (0 = sem limite)
   max_days_to_submit: '60',
+  // Avisos por e-mail (exigem SMTP configurado no servidor)
+  email_enabled: '1',
+  // Tipos de aviso enviados por e-mail
+  email_types: JSON.stringify(['edicao_despesa', 'exclusao_despesa', 'aprovacao_pendente', 'aprovada_alcada', 'prestacao_status', 'glosa', 'adiantamento', 'despesa_lancada']),
+  // Hora (0-23) do lembrete diário de aprovações pendentes; vazio = desativado
+  reminder_hour: '8',
+  reminder_last_date: '',
 };
 
 function getSetting(key) {

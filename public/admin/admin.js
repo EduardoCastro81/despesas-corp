@@ -54,7 +54,7 @@ function shell() {
       <div class="brand"><span class="logo">R$</span><div>Despesas Corp<div class="muted small" style="font-weight:400">${esc(session.meta.company_name)}</div></div></div>
       <nav id="nav"></nav>
       <div class="who"><strong>${esc(session.me.name)}</strong><div class="muted">${esc(session.meta.roles[session.me.role])}</div>
-        <div class="row" style="margin-top:.5rem"><a class="btn sm" href="/app/">Lançar despesa</a><button class="btn sm" id="pw">Senha</button><button class="btn sm" id="lo">Sair</button></div></div>
+        <div class="row" style="margin-top:.5rem"><a class="btn sm" href="/app/">Lançar despesa</a><button class="btn sm" id="pw">Perfil</button><button class="btn sm" id="lo">Sair</button></div></div>
     </aside>
     <main class="main"><div id="page"></div></main></div>`;
   $('#lo').onclick = logout;
@@ -77,8 +77,15 @@ async function refreshCounters() {
 }
 function changePassword() {
   modal({
-    title: 'Alterar senha', body: `<div class="stack"><label class="f">Senha atual<input type="password" id="pc"></label><label class="f">Nova senha<input type="password" id="pn"></label></div>`,
-    actions: [{ label: 'Cancelar' }, { label: 'Salvar', kind: 'primary', onClick: async ({ el }) => { await api('/me/password', { method: 'POST', body: { current: $('#pc', el).value, password: $('#pn', el).value } }); toast('Senha alterada', 'good'); } }],
+    title: 'Meu perfil', body: `<div class="stack">
+      <label class="row" style="gap:.4rem"><input type="checkbox" id="pe" ${session.me.email_notifications ? 'checked' : ''}> Receber avisos por e-mail em ${esc(session.me.email)}</label>
+      <h3 style="margin-top:1rem">Alterar senha</h3><label class="f">Senha atual<input type="password" id="pc"></label><label class="f">Nova senha<input type="password" id="pn"></label></div>`,
+    actions: [{ label: 'Cancelar' }, { label: 'Salvar', kind: 'primary', onClick: async ({ el }) => {
+      const pref = $('#pe', el).checked;
+      if (pref !== Boolean(session.me.email_notifications)) { await api('/me/preferences', { method: 'PUT', body: { email_notifications: pref } }); session.me.email_notifications = pref ? 1 : 0; }
+      if ($('#pn', el).value) await api('/me/password', { method: 'POST', body: { current: $('#pc', el).value, password: $('#pn', el).value } });
+      toast('Perfil atualizado', 'good');
+    } }],
   });
 }
 
@@ -531,10 +538,11 @@ function userForm(u, done) {
       <label class="f">Centro de custo<input id="cc" value="${esc(u?.cost_center || '')}"></label><label class="f">Departamento<input id="dp" value="${esc(u?.department || '')}"></label>
       <label class="f">CPF<input id="cpf" value="${esc(u?.cpf || '')}"></label>
       <label class="f">${u ? 'Nova senha (opcional)' : 'Senha inicial'}<input id="p" type="password" autocomplete="new-password"></label>
+      <label class="f">Avisos por e-mail<select id="en"><option value="1">Receber</option><option value="0" ${u && !u.email_notifications ? 'selected' : ''}>Não receber</option></select></label>
       ${u ? `<label class="f"><span>Situação</span><select id="a"><option value="1" ${u.active ? 'selected' : ''}>Ativo</option><option value="0" ${u.active ? '' : 'selected'}>Inativo</option></select></label>` : ''}
     </div>`,
     actions: [{ label: 'Cancelar' }, { label: 'Salvar', kind: 'primary', onClick: async ({ el }) => {
-      const b = { name: $('#n', el).value, email: $('#e', el).value, role: $('#r', el).value, supervisor_id: $('#s', el).value || null, cost_center: $('#cc', el).value, department: $('#dp', el).value, cpf: $('#cpf', el).value };
+      const b = { name: $('#n', el).value, email: $('#e', el).value, role: $('#r', el).value, supervisor_id: $('#s', el).value || null, cost_center: $('#cc', el).value, department: $('#dp', el).value, cpf: $('#cpf', el).value, email_notifications: $('#en', el).value === '1' };
       const p = $('#p', el).value; if (p) b.password = p;
       if (u) { b.active = $('#a', el).value === '1'; await api(`/users/${u.id}`, { method: 'PUT', body: b }); } else await api('/users', { method: 'POST', body: b });
       toast('Usuário salvo', 'good'); done();
@@ -568,7 +576,8 @@ PAGES.categorias = async (page) => {
 
 // ---------- Configurações ----------
 PAGES.config = async (page) => {
-  const s = await api('/settings');
+  const [s, emailTypes] = await Promise.all([api('/settings'), api('/email/types')]);
+  const enabledTypes = JSON.parse(s.email_types || '[]');
   const editable = JSON.parse(s.supervisor_editable_fields || '[]');
   page.innerHTML = head('Configurações', 'Regras de aprovação, permissões do supervisor e leitura automática');
   const box = document.createElement('div');
@@ -587,16 +596,56 @@ PAGES.config = async (page) => {
     <div class="card"><h2>Leitura automática de comprovantes</h2>${s.ocr_enabled
       ? `<div class="alert good">Ativa — modelo <code>${esc(s.ocr_model)}</code>. Fotos de notas, cupons e recibos preenchem os campos automaticamente.</div>`
       : '<div class="alert warn">Inativa. Defina a variável de ambiente <code>ANTHROPIC_API_KEY</code> no servidor e reinicie para habilitar o preenchimento automático pela foto.</div>'}</div>
+    <div class="card"><h2>Avisos por e-mail</h2>
+      ${s.email_configured
+        ? `<div class="alert good">Servidor de e-mail configurado — remetente <code>${esc(s.email_from)}</code>. Links dos e-mails apontam para <code>${esc(s.app_url)}</code>.</div>`
+        : '<div class="alert warn">Servidor de e-mail (SMTP) não configurado. Defina <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code>, <code>SMTP_PASS</code>, <code>MAIL_FROM</code> e <code>APP_URL</code> no servidor e reinicie. Enquanto isso, os avisos aparecem apenas dentro do sistema.</div>'}
+      <div class="stack" style="margin-top:.75rem">
+        <label class="row" style="gap:.4rem"><input type="checkbox" id="em" ${s.email_enabled === '1' ? 'checked' : ''}> Enviar avisos por e-mail (além do aviso dentro do sistema)</label>
+        <div><strong class="small">Enviar e-mail para:</strong><div class="form-grid" style="margin-top:.4rem">${Object.entries(emailTypes).map(([k, v]) => `<label class="row" style="gap:.4rem;align-items:flex-start;flex-wrap:nowrap"><input type="checkbox" value="${k}" data-et ${enabledTypes.includes(k) ? 'checked' : ''}> ${esc(v)}</label>`).join('')}</div></div>
+        <label class="f" style="max-width:320px">Lembrete diário de prestações pendentes<select id="rh"><option value="">Desativado</option>${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${String(s.reminder_hour) === String(h) ? 'selected' : ''}>Todo dia às ${String(h).padStart(2, '0')}:00</option>`).join('')}</select>
+          <span class="muted small">Supervisores e gestores recebem um resumo das prestações que aguardam aprovação ou pagamento.</span></label>
+        <div class="row"><input id="tto" type="email" placeholder="e-mail para teste" value="${esc(session.me.email)}" style="max-width:280px"><button class="btn" id="tst" ${s.email_configured ? '' : 'disabled'}>Enviar e-mail de teste</button><button class="btn" id="rem" ${s.email_configured ? '' : 'disabled'}>Enviar lembrete agora</button><button class="btn" id="elog">Histórico de envios</button></div>
+        <p class="muted small">Cada usuário pode desativar o recebimento de e-mails no próprio perfil.</p>
+      </div></div>
     <div><button class="btn primary" id="sv">Salvar configurações</button></div>`;
   page.append(box);
   $('#sv').onclick = async () => {
     await api('/settings', { method: 'PUT', body: {
       company_name: $('#cn').value, supervisor_approval_limit_cents: Math.round(Number($('#lim').value || 0) * 100), max_days_to_submit: Number($('#md').value || 0),
       supervisor_editable_fields: $$('[data-sf]').filter((x) => x.checked).map((x) => x.value), notify_owner_draft_edits: $('#nd').checked ? '1' : '0',
+      email_enabled: $('#em').checked ? '1' : '0', email_types: $$('[data-et]').filter((x) => x.checked).map((x) => x.value), reminder_hour: $('#rh').value,
     } }).then(() => toast('Configurações salvas', 'good'), fail);
     session.meta = await api('/meta');
   };
+  $('#tst').onclick = async () => {
+    $('#tst').disabled = true;
+    await api('/email/test', { method: 'POST', body: { to: $('#tto').value } }).then((r) => toast(`E-mail de teste enviado para ${r.to}`, 'good'), fail);
+    $('#tst').disabled = false;
+  };
+  $('#rem').onclick = () => api('/email/reminders', { method: 'POST' }).then((r) => toast(`Lembrete enviado para ${r.recipients} aprovador(es)`, 'good'), fail);
+  $('#elog').onclick = emailLog;
 };
+
+async function emailLog() {
+  const { counts, items } = await api('/email/log');
+  const L = { pendente: 'Pendente', enviado: 'Enviado', erro: 'Erro' };
+  const K = { pendente: 'warn', enviado: 'good', erro: 'bad' };
+  const m = modal({
+    title: 'Histórico de e-mails', wide: true,
+    body: `<p class="muted">Enviados: ${counts.enviado || 0} · Pendentes: ${counts.pendente || 0} · Com erro: ${counts.erro || 0}. Falhas são reenviadas automaticamente até 5 vezes.</p>
+      <div class="table-wrap"><table class="t"><thead><tr><th>Data</th><th>Para</th><th>Assunto</th><th>Situação</th><th></th></tr></thead><tbody>
+      ${items.map((x) => `<tr><td>${dtt(x.created_at)}</td><td>${esc(x.user_name || '')}<div class="muted small">${esc(x.to_email)}</div></td><td>${esc(x.subject)}</td>
+        <td><span class="badge ${K[x.status]}">${L[x.status]}</span>${x.last_error ? `<div class="small" style="color:var(--bad)">${esc(x.last_error)}</div>` : ''}${x.attempts > 1 ? `<div class="muted small">${x.attempts} tentativas</div>` : ''}</td>
+        <td>${x.status !== 'enviado' ? `<button class="btn sm" data-retry="${x.id}">Reenviar</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">Nenhum e-mail enviado ainda</td></tr>'}
+      </tbody></table></div>`,
+  });
+  $$('[data-retry]', m.el).forEach((b) => (b.onclick = async () => {
+    const r = await api(`/email/log/${b.dataset.retry}/retry`, { method: 'POST' }).catch(fail);
+    if (r) toast(r.status === 'enviado' ? 'E-mail reenviado' : `Ainda com falha: ${r.last_error || r.status}`, r.status === 'enviado' ? 'good' : 'bad');
+    m.close(); emailLog();
+  }));
+}
 
 // Atalho: links de notificação "#/despesa/:id" abrem o detalhe sobre a conferência
 PAGES.despesa = async (page, id) => { await PAGES.conferencia(page); expenseDetail(Number(id)); };

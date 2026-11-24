@@ -273,8 +273,11 @@ P.perfil = async (page) => {
   const me = session.me;
   page.innerHTML = `<div class="stack"><div class="card"><h2>${esc(me.name)}</h2><dl class="kv"><dt>E-mail</dt><dd>${esc(me.email)}</dd><dt>Perfil</dt><dd>${esc(session.meta.roles[me.role])}</dd>
     <dt>Supervisor</dt><dd>${esc(me.supervisor?.name || '—')}</dd><dt>Centro de custo</dt><dd>${esc(me.cost_center || '—')}</dd></dl></div>
+    <div class="card"><h2>Avisos</h2><label class="row" style="gap:.5rem;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="en" ${me.email_notifications ? 'checked' : ''}> <span>Receber avisos por e-mail${session.meta.email_configured ? '' : ' <span class="muted small">(envio de e-mails ainda não configurado pela empresa)</span>'}</span></label>
+      <p class="muted small">Você é avisado quando uma prestação é aprovada, devolvida ou rejeitada, quando uma despesa sua é editada ou glosada e sobre seus adiantamentos.</p></div>
     <div class="card"><h2>Alterar senha</h2><div class="stack"><label class="f">Senha atual<input type="password" id="pc"></label><label class="f">Nova senha<input type="password" id="pn"></label><button class="btn" id="sp">Salvar senha</button></div></div>
     <div class="row"><a class="btn" href="#/adiantamentos">Adiantamentos</a><a class="btn" href="#/notificacoes">Notificações</a>${me.role !== 'colaborador' ? '<a class="btn" href="/admin/">Plataforma de administração</a>' : ''}<button class="btn danger" id="lo">Sair</button></div></div>`;
+  $('#en').onchange = (ev) => api('/me/preferences', { method: 'PUT', body: { email_notifications: ev.target.checked } }).then(() => { me.email_notifications = ev.target.checked ? 1 : 0; toast(ev.target.checked ? 'Você receberá avisos por e-mail' : 'Avisos por e-mail desativados', 'good'); }, fail);
   $('#sp').onclick = () => api('/me/password', { method: 'POST', body: { current: $('#pc').value, password: $('#pn').value } }).then(() => toast('Senha alterada', 'good'), fail);
   $('#lo').onclick = () => { session.clear(); location.hash = ''; location.reload(); };
 };

@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const { one, all, run, getSettings, setSetting } = require('../db');
 const C = require('../common');
 const { isConfigured, MODEL } = require('../services/ocr');
+const email = require('../services/email');
 const { authenticate, requireRole, wrap, bad, forbidden, notFound, signToken } = C;
 
 const r = express.Router();
@@ -37,6 +38,12 @@ r.post('/me/password', wrap((req, res) => {
   res.json({ ok: true });
 }));
 
+r.put('/me/preferences', wrap((req, res) => {
+  const b = req.body || {};
+  if (b.email_notifications !== undefined) run('UPDATE users SET email_notifications = ? WHERE id = ?', b.email_notifications ? 1 : 0, req.user.id);
+  res.json({ ok: true });
+}));
+
 // ---------- Metadados (listas de domínio) ----------
 r.get('/meta', wrap((req, res) => {
   const s = getSettings();
@@ -48,11 +55,12 @@ r.get('/meta', wrap((req, res) => {
     company_name: s.company_name,
     supervisor_editable_fields: JSON.parse(s.supervisor_editable_fields || '[]'),
     ocr_enabled: isConfigured(),
+    email_configured: email.isConfigured(),
   });
 }));
 
 // ---------- Usuários ----------
-const USER_COLS = 'u.id, u.name, u.email, u.role, u.supervisor_id, u.cost_center, u.department, u.cpf, u.active, u.created_at, s.name AS supervisor_name';
+const USER_COLS = 'u.id, u.name, u.email, u.role, u.supervisor_id, u.cost_center, u.department, u.cpf, u.active, u.email_notifications, u.created_at, s.name AS supervisor_name';
 
 r.get('/users', wrap((req, res) => {
   let rows;
@@ -104,6 +112,7 @@ r.put('/users/:id', requireRole('master', 'gestor'), wrap((req, res) => {
     b.supervisor_id === undefined ? u.supervisor_id : (b.supervisor_id || null),
     b.cost_center ?? u.cost_center, b.department ?? u.department, b.cpf ?? u.cpf,
     b.active === undefined ? u.active : (b.active ? 1 : 0), u.id);
+  if (b.email_notifications !== undefined) run('UPDATE users SET email_notifications = ? WHERE id = ?', b.email_notifications ? 1 : 0, u.id);
   if (b.password) {
     if (String(b.password).length < 6) throw bad('Senha deve ter ao menos 6 caracteres');
     run('UPDATE users SET password_hash = ? WHERE id = ?', bcrypt.hashSync(String(b.password), 10), u.id);
@@ -133,11 +142,15 @@ r.put('/categories/:id', requireRole('master', 'gestor'), wrap((req, res) => {
 
 // ---------- Configurações ----------
 r.get('/settings', requireRole('master', 'gestor'), wrap((req, res) => {
-  res.json({ ...getSettings(), ocr_enabled: isConfigured(), ocr_model: MODEL });
+  res.json({
+    ...getSettings(), ocr_enabled: isConfigured(), ocr_model: MODEL,
+    email_configured: email.isConfigured(), email_from: email.isConfigured() ? email.fromAddress() : null, app_url: email.appUrl(),
+  });
 }));
 
 r.put('/settings', requireRole('master', 'gestor'), wrap((req, res) => {
-  const allowed = ['company_name', 'supervisor_approval_limit_cents', 'supervisor_editable_fields', 'notify_owner_draft_edits', 'max_days_to_submit'];
+  const allowed = ['company_name', 'supervisor_approval_limit_cents', 'supervisor_editable_fields', 'notify_owner_draft_edits', 'max_days_to_submit',
+    'email_enabled', 'email_types', 'reminder_hour'];
   for (const k of allowed) {
     if (req.body[k] === undefined) continue;
     let v = req.body[k];
@@ -145,9 +158,60 @@ r.put('/settings', requireRole('master', 'gestor'), wrap((req, res) => {
       if (!Array.isArray(v)) throw bad('Lista de campos inválida');
       v = JSON.stringify(v.filter((f) => C.EXPENSE_FIELDS[f]));
     }
+    if (k === 'email_types') {
+      if (!Array.isArray(v)) throw bad('Lista de tipos inválida');
+      v = JSON.stringify(v.filter((t) => EMAIL_TYPES[t]));
+    }
+    if (k === 'email_enabled') v = v === true || v === '1' || v === 1 ? '1' : '0';
+    if (k === 'reminder_hour' && v !== '' && v !== null && !(Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) <= 23)) throw bad('Hora do lembrete inválida (0 a 23)');
+    if (k === 'reminder_hour' && v === null) v = '';
     setSetting(k, v);
   }
   res.json({ ok: true });
+}));
+
+// ---------- E-mail ----------
+const EMAIL_TYPES = {
+  edicao_despesa: 'Edição de despesa (antes/depois)',
+  exclusao_despesa: 'Exclusão de despesa',
+  aprovacao_pendente: 'Prestação aguardando aprovação',
+  aprovada_alcada: 'Aprovação na alçada do supervisor',
+  prestacao_status: 'Mudança de situação da prestação (aprovada, devolvida, rejeitada, finalizada)',
+  glosa: 'Glosa de despesa',
+  adiantamento: 'Adiantamentos (solicitação, aprovação, pagamento)',
+  despesa_lancada: 'Despesa lançada em nome do colaborador',
+};
+r.get('/email/types', requireRole('master', 'gestor'), (req, res) => res.json(EMAIL_TYPES));
+
+r.post('/email/test', requireRole('master', 'gestor'), wrap(async (req, res) => {
+  const to = String(req.body?.to || req.user.email).trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw bad('E-mail inválido');
+  try {
+    await email.sendTest(to);
+  } catch (e) {
+    throw bad(`Falha no envio: ${e.message}`);
+  }
+  res.json({ ok: true, to });
+}));
+
+r.get('/email/log', requireRole('master', 'gestor'), wrap((req, res) => {
+  const counts = Object.fromEntries(all('SELECT status, COUNT(*) n FROM email_outbox GROUP BY status').map((x) => [x.status, x.n]));
+  const items = all(`SELECT o.id, o.to_email, o.subject, o.type, o.status, o.attempts, o.last_error, o.created_at, o.sent_at, u.name AS user_name
+    FROM email_outbox o LEFT JOIN users u ON u.id = o.user_id ORDER BY o.id DESC LIMIT 100`);
+  res.json({ counts, items });
+}));
+
+r.post('/email/log/:id/retry', requireRole('master', 'gestor'), wrap(async (req, res) => {
+  run(`UPDATE email_outbox SET status = 'pendente', attempts = 0, next_attempt_at = datetime('now','localtime') WHERE id = ? AND status <> 'enviado'`, req.params.id);
+  await email.processQueue();
+  res.json(one('SELECT id, status, last_error FROM email_outbox WHERE id = ?', req.params.id));
+}));
+
+r.post('/email/reminders', requireRole('master', 'gestor'), wrap(async (req, res) => {
+  if (!email.isEnabled()) throw bad('Avisos por e-mail desativados ou SMTP não configurado');
+  const n = email.sendDailyReminders({ force: true });
+  await email.processQueue();
+  res.json({ ok: true, recipients: n });
 }));
 
 // ---------- Notificações ----------

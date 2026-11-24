@@ -41,6 +41,7 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 
 const PORT = Number(process.env.PORT || 3000);
 if (require.main === module) {
+  require('./services/email').start();
   app.listen(PORT, () => {
     console.log(`Despesas Corp rodando em http://localhost:${PORT}`);
     console.log(`  Plataforma de administração: http://localhost:${PORT}/admin/`);

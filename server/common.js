@@ -84,7 +84,7 @@ function authenticate(req, res, next) {
   if (!token) return next(new HttpError(401, 'Não autenticado'));
   try {
     const payload = jwt.verify(token, SECRET);
-    const u = one('SELECT id, name, email, role, supervisor_id, cost_center, department, active FROM users WHERE id = ?', payload.sub);
+    const u = one('SELECT id, name, email, role, supervisor_id, cost_center, department, active, email_notifications FROM users WHERE id = ?', payload.sub);
     if (!u || !u.active) return next(new HttpError(401, 'Usuário inativo'));
     req.user = u;
     next();

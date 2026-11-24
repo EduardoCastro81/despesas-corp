@@ -32,7 +32,7 @@ npm run seed:demo
 Os usuários de demonstração usam a senha `demo123`: `gestor@demo.com`, `supervisor@demo.com`, `supervisora@demo.com`,
 `carlos@demo.com`, `ana@demo.com`, `bruno@demo.com` e `diana@demo.com`.
 
-Testes automatizados (cobrem perfis, fluxo de aprovação, edição com notificação, adiantamentos e relatórios):
+Testes automatizados (cobrem perfis, fluxo de aprovação, edição com notificação, adiantamentos, relatórios e avisos por e-mail):
 
 ```bash
 npm test
@@ -40,9 +40,16 @@ npm test
 
 ### Variáveis de ambiente
 
+As variáveis podem ser definidas no ambiente do servidor ou num arquivo `.env` na pasta do sistema (copie de
+`.env.example`). O arquivo `.env` não é enviado ao GitHub.
+
 | Variável | Uso |
 |---|---|
 | `ANTHROPIC_API_KEY` | Ativa a leitura automática dos comprovantes. Sem ela o sistema funciona normalmente, mas o preenchimento é manual |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | Servidor de e-mail para os avisos. Sem `SMTP_HOST` os avisos aparecem só dentro do sistema |
+| `SMTP_SECURE` | `true` para SSL direto (porta 465). Padrão: automático pela porta |
+| `MAIL_FROM` | Remetente dos e-mails, ex.: `Despesas <despesas@suaempresa.com.br>` |
+| `APP_URL` | Endereço público do sistema, usado nos links dos e-mails |
 | `CLAUDE_MODEL` | Modelo usado na leitura (padrão `claude-opus-5-5`) |
 | `PORT` | Porta HTTP (padrão 3000) |
 | `DATA_DIR` | Pasta do banco e dos comprovantes (padrão `./data`). **Inclua essa pasta no backup** |
@@ -68,6 +75,25 @@ houver gestor ativo, os masters recebem). A notificação traz cada campo altera
 editou, o perfil e a justificativa. O dono da despesa também é avisado quando outra pessoa edita o lançamento dele. O
 mesmo vale para glosas, exclusões e inclusão ou remoção de comprovantes. Em Configurações dá para desligar a
 notificação das edições que o colaborador faz nos próprios rascunhos.
+
+### Avisos por e-mail
+
+Com o SMTP configurado, os avisos do sistema também chegam por e-mail, com um botão que abre o item direto na
+plataforma certa: administração para master, gestor e supervisor, lançamento para o colaborador. O e-mail de edição
+traz a tabela de **antes → depois** e a justificativa.
+
+- Em **Configurações**, o gestor liga ou desliga o envio, escolhe os tipos de aviso enviados (edições, exclusões,
+  aprovações pendentes, mudança de situação da prestação, glosas, adiantamentos), envia um e-mail de teste e consulta o
+  **histórico de envios**.
+- **Lembrete diário** (horário configurável): cada supervisor recebe a lista das prestações do seu time que aguardam
+  aprovação, e os gestores recebem as que aguardam aprovação final ou pagamento.
+- Cada usuário pode deixar de receber e-mails no próprio **Perfil**. O gestor também pode ajustar isso no cadastro do
+  usuário.
+- Os e-mails são enviados em segundo plano. Se o servidor de e-mail falhar, o sistema tenta de novo automaticamente
+  (até 5 vezes, em intervalos crescentes) e a falha aparece no histórico, com opção de reenviar.
+
+Exemplos de SMTP: Google Workspace/Gmail usa `smtp.gmail.com`, porta 587, com uma "senha de app". Microsoft 365 usa
+`smtp.office365.com`, porta 587.
 
 ## Rotina de aprovação da prestação de contas
 
@@ -124,10 +150,12 @@ server/
   routes/analytics.js relatórios gerenciais
   services/ocr.js     leitura automática de comprovantes (Claude)
   services/notify.js  notificações e cálculo do antes/depois
+  services/email.js   avisos por e-mail: fila, envio SMTP, novas tentativas, lembrete diário
   seed-demo.js        dados de demonstração
 public/
   app/                plataforma de lançamento (mobile)
   admin/              plataforma de administração
   shared/             estilos e componentes comuns
 test/api.test.js      testes do fluxo completo
+test/email.test.js    testes dos avisos por e-mail (com servidor SMTP de teste)
 ```

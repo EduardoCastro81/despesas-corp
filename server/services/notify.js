@@ -1,10 +1,16 @@
 'use strict';
 const { all, one, run } = require('../db');
 const { EXPENSE_FIELDS, PAYMENT_METHODS, DOC_TYPES, ROLES, brl } = require('../common');
+const email = require('./email');
 
 function notify(userId, { type, title, body = null, link = null, data = null }) {
   run('INSERT INTO notifications(user_id, type, title, body, link, data) VALUES(?,?,?,?,?,?)',
     userId, type, title, body, link, data ? JSON.stringify(data) : null);
+  try {
+    email.queueNotificationEmail(userId, { type, title, body, link, data });
+  } catch (e) {
+    console.error('[email] não foi possível enfileirar aviso:', e.message);
+  }
 }
 
 // Gestores ativos (se não houver nenhum, os masters recebem)
