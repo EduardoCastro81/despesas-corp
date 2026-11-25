@@ -70,6 +70,18 @@ git pull && docker compose up -d --build
 3. Cadastre gestores, supervisores e colaboradores (**Usuários e equipes**) e revise as **categorias e limites**.
 4. Faça um **backup manual** em Configurações para confirmar que está funcionando.
 
+## Perdi o acesso do administrador master
+
+1. No painel do serviço (Render: **Environment**), adicione a variável `MASTER_RESET_PASSWORD` com uma nova senha (8
+   ou mais caracteres, com letras e números). Confira se `MASTER_EMAIL` tem o e-mail que você quer usar no login.
+2. Salve. O serviço reinicia e o log mostra `[recuperação] Acesso do master redefinido para ...`.
+3. Entre com esse e-mail e a nova senha.
+4. **Remova a variável `MASTER_RESET_PASSWORD`.** Enquanto ela existir, a senha volta a ser redefinida a cada
+   reinício.
+
+Nenhum dado é apagado. Se o e-mail de `MASTER_EMAIL` ainda não existir no sistema, um novo master é criado com ele.
+O procedimento também desbloqueia um login bloqueado por tentativas erradas, porque o reinício zera o bloqueio.
+
 ## Backup e restauração
 
 - **Automático:** todo dia, a partir de `BACKUP_HOUR` (padrão 2h), o sistema copia o banco e os comprovantes e guarda

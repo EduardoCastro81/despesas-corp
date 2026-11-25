@@ -262,4 +262,29 @@ function seedBase() {
 }
 seedBase();
 
+// Recuperação de acesso: com MASTER_RESET_PASSWORD definida, a cada inicialização a senha do master
+// (MASTER_EMAIL, ou o primeiro master existente) é redefinida, o usuário é reativado e as sessões são
+// encerradas. Se MASTER_EMAIL não existir, um novo master é criado. Remova a variável após entrar.
+function recoverMaster() {
+  const pass = process.env.MASTER_RESET_PASSWORD;
+  if (!pass) return;
+  if (pass.length < 8 || !/[A-Za-z]/.test(pass) || !/\d/.test(pass)) {
+    console.error('[recuperação] MASTER_RESET_PASSWORD ignorada: use ao menos 8 caracteres, com letras e números.');
+    return;
+  }
+  const hash = bcrypt.hashSync(pass, 10);
+  const wanted = (process.env.MASTER_EMAIL || '').trim();
+  let u = wanted ? one('SELECT id, email FROM users WHERE email = ?', wanted)
+    : one(`SELECT id, email FROM users WHERE role = 'master' ORDER BY id LIMIT 1`);
+  if (u) {
+    run(`UPDATE users SET password_hash = ?, role = 'master', active = 1, token_version = token_version + 1 WHERE id = ?`, hash, u.id);
+  } else {
+    const email = wanted || 'admin@empresa.com';
+    run(`INSERT INTO users(name,email,password_hash,role) VALUES(?,?,?, 'master')`, 'Administrador Master', email, hash);
+    u = { email };
+  }
+  console.log(`[recuperação] Acesso do master redefinido para ${u.email}. Entre com a senha de MASTER_RESET_PASSWORD e depois REMOVA essa variável.`);
+}
+recoverMaster();
+
 module.exports = { db, tx, one, all, run, getSetting, getSettings, setSetting, DATA_DIR, UPLOAD_DIR };
