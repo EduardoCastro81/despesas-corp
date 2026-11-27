@@ -76,8 +76,8 @@ git pull && docker compose up -d --build
    ou mais caracteres, com letras e números). Confira se `MASTER_EMAIL` tem o e-mail que você quer usar no login.
 2. Salve. O serviço reinicia e o log mostra `[recuperação] Acesso do master redefinido para ...`.
 3. Entre com esse e-mail e a nova senha.
-4. **Remova a variável `MASTER_RESET_PASSWORD`.** Enquanto ela existir, a senha volta a ser redefinida a cada
-   reinício.
+4. Troque a senha em **Perfil** e remova a variável `MASTER_RESET_PASSWORD`. Cada valor da variável é aplicado uma
+   única vez, então reinícios não desfazem a troca. Para uma nova recuperação no futuro, use um valor diferente.
 
 Nenhum dado é apagado. Se o e-mail de `MASTER_EMAIL` ainda não existir no sistema, um novo master é criado com ele.
 O procedimento também desbloqueia um login bloqueado por tentativas erradas, porque o reinício zera o bloqueio.

@@ -41,6 +41,17 @@ test('recupera o acesso do master sem perder dados', () => {
   // após remover a variável, a senha continua valendo
   r = boot(dir, { MASTER_EMAIL: 'dono@empresa.com', T_EMAIL: 'dono@empresa.com', T_PASS: 'Recupera2026' });
   assert.deepStrictEqual(r.result, ['200', 'master']);
+  // o usuário troca a senha; reiniciar com a variável esquecida NÃO desfaz a troca
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(path.join(dir, 'despesas.db'));
+  db.prepare('UPDATE users SET password_hash = ? WHERE email = ?').run(require('bcryptjs').hashSync('Trocada99', 10), 'dono@empresa.com');
+  db.close();
+  r = boot(dir, { MASTER_EMAIL: 'dono@empresa.com', MASTER_RESET_PASSWORD: 'Recupera2026', T_EMAIL: 'dono@empresa.com', T_PASS: 'Trocada99' });
+  assert.match(r.out, /já foi aplicada/);
+  assert.deepStrictEqual(r.result, ['200', 'master']);
+  // um novo valor na variável é aplicado (nova recuperação)
+  r = boot(dir, { MASTER_EMAIL: 'dono@empresa.com', MASTER_RESET_PASSWORD: 'Outra2027x', T_EMAIL: 'dono@empresa.com', T_PASS: 'Outra2027x' });
+  assert.deepStrictEqual(r.result, ['200', 'master']);
   // e-mail diferente do master existente: cria um novo master
   r = boot(dir, { MASTER_EMAIL: 'outro@empresa.com', MASTER_RESET_PASSWORD: 'Recupera2026', T_EMAIL: 'outro@empresa.com', T_PASS: 'Recupera2026' });
   assert.deepStrictEqual(r.result, ['200', 'master']);

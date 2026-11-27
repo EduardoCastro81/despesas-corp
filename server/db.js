@@ -262,9 +262,9 @@ function seedBase() {
 }
 seedBase();
 
-// Recuperação de acesso: com MASTER_RESET_PASSWORD definida, a cada inicialização a senha do master
+// Recuperação de acesso: com MASTER_RESET_PASSWORD definida, a senha do master
 // (MASTER_EMAIL, ou o primeiro master existente) é redefinida, o usuário é reativado e as sessões são
-// encerradas. Se MASTER_EMAIL não existir, um novo master é criado. Remova a variável após entrar.
+// encerradas — uma única vez por valor. Se MASTER_EMAIL não existir, um novo master é criado.
 function recoverMaster() {
   const pass = process.env.MASTER_RESET_PASSWORD;
   if (!pass) return;
@@ -272,8 +272,15 @@ function recoverMaster() {
     console.error('[recuperação] MASTER_RESET_PASSWORD ignorada: use ao menos 8 caracteres, com letras e números.');
     return;
   }
-  const hash = bcrypt.hashSync(pass, 10);
   const wanted = (process.env.MASTER_EMAIL || '').trim();
+  // Aplica uma única vez por valor: se a variável ficar esquecida, reinícios não desfazem trocas de senha
+  const marker = require('crypto').createHash('sha256').update(`${wanted.toLowerCase()}\n${pass}`).digest('hex');
+  if (getSetting('master_reset_applied') === marker) {
+    console.log('[recuperação] MASTER_RESET_PASSWORD já foi aplicada anteriormente e foi ignorada. Remova essa variável.');
+    return;
+  }
+  setSetting('master_reset_applied', marker);
+  const hash = bcrypt.hashSync(pass, 10);
   let u = wanted ? one('SELECT id, email FROM users WHERE email = ?', wanted)
     : one(`SELECT id, email FROM users WHERE role = 'master' ORDER BY id LIMIT 1`);
   if (u) {
